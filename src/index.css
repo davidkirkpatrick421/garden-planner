@@ -51,6 +51,11 @@
  * Apply `.texture-overlay` to any surface that needs the tactile grain. The
  * host element must be `position: relative` and may need `overflow: hidden`.
  */
+@keyframes flash-fade {
+  from { opacity: 1; }
+  to   { opacity: 0; }
+}
+
 .texture-overlay::before {
   content: '';
   position: absolute;

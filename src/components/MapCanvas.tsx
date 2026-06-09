@@ -1,7 +1,13 @@
-// The Mapbox map. This is the live, working component — everything else is a
-// stub. Renders a satellite map centred on Carrickfergus (CLAUDE.md "What to
-// Build Next"). Satellite style is used during boundary drawing; the warm
-// vector style switch happens later once drawing is wired up.
+// The Mapbox map — live, working component.
+// Starts at the default location; GeolocateControl flies to the user's actual
+// position after map load. Falls back gracefully if geolocation is denied.
+//
+// Why GeolocateControl instead of navigator.geolocation directly:
+//   - Chrome doesn't persist geolocation permissions for HTTP origins, so
+//     navigator.getCurrentPosition re-prompts on every page load.
+//   - The 5 s timeout fires before the user clicks "Allow" in the dialog,
+//     silently falling back to the default location.
+//   - GeolocateControl handles these browser quirks and StrictMode correctly.
 import { useEffect, useRef } from 'react'
 import mapboxgl from 'mapbox-gl'
 import { DEFAULT_LOCATION, DEFAULT_ZOOM } from '../types'
@@ -9,7 +15,11 @@ import { DEFAULT_LOCATION, DEFAULT_ZOOM } from '../types'
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN
 const SATELLITE_STYLE = 'mapbox://styles/mapbox/satellite-streets-v12'
 
-export function MapCanvas() {
+interface MapCanvasProps {
+  onMapReady?: (map: mapboxgl.Map) => void
+}
+
+export function MapCanvas({ onMapReady }: MapCanvasProps) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const mapRef = useRef<mapboxgl.Map | null>(null)
   // StrictMode double-invokes effects in dev — guard so the map inits once.
@@ -18,7 +28,7 @@ export function MapCanvas() {
   useEffect(() => {
     if (initialised.current) return
     if (!containerRef.current) return
-    if (!MAPBOX_TOKEN) return // missing-token UI handled below
+    if (!MAPBOX_TOKEN) return
     initialised.current = true
 
     mapboxgl.accessToken = MAPBOX_TOKEN
@@ -31,6 +41,19 @@ export function MapCanvas() {
       attributionControl: true,
     })
     mapRef.current = map
+    onMapReady?.(map)
+
+    // Trigger geolocation after the style loads. GeolocateControl handles the
+    // browser permission prompt correctly on both HTTP and HTTPS.
+    // The button stays visible so the user can re-trigger manually.
+    const geolocate = new mapboxgl.GeolocateControl({
+      positionOptions: { enableHighAccuracy: true },
+      fitBoundsOptions: { zoom: DEFAULT_ZOOM },
+      trackUserLocation: false,
+      showUserLocation: false,
+    })
+    map.addControl(geolocate, 'bottom-right')
+    map.once('load', () => geolocate.trigger())
 
     return () => {
       map.remove()
