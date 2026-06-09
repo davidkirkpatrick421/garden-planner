@@ -66,7 +66,8 @@ export interface UseDrawToolResult {
   isDrawing: boolean
   startBoundary: () => void
   startZone: () => void
-  stopZoneDrawing: () => void
+  /** Cancel whichever draw mode is active, re-enable dragPan, and clean up. */
+  cancelDrawing: () => void
   undoLastPoint: () => void
 }
 
@@ -151,7 +152,7 @@ export function useDrawTool(
     drawRef.current.changeMode('draw_polygon')
   }, [mapRef, handleCreate])
 
-  const stopZoneDrawing = useCallback(() => {
+  const cancelDrawing = useCallback(() => {
     const map = mapRef.current
     if (!map) return
 
@@ -178,5 +179,5 @@ export function useDrawTool(
     container.dispatchEvent(new KeyboardEvent('keyup', opts))
   }, [mapRef])
 
-  return { isDrawing, startBoundary, startZone, stopZoneDrawing, undoLastPoint }
+  return { isDrawing, startBoundary, startZone, cancelDrawing, undoLastPoint }
 }

@@ -9,9 +9,11 @@ import { ZonePanel } from './components/ZonePanel'
 import { useDrawTool } from './hooks/useDrawTool'
 import { useZones } from './hooks/useZones'
 import { addBoundaryLayer, updateZoneLayers } from './lib/mapLayers'
-import type { GeoJSONPolygon, Zone, ZoneType } from './types'
+import type { GeoJSONPolygon, Season, Zone, ZoneType } from './types'
+import { DEFAULT_ZOOM } from './types'
 
 const WARM_STYLE = 'mapbox://styles/mapbox/standard'
+const SATELLITE_STYLE = 'mapbox://styles/mapbox/satellite-streets-v12'
 
 type ActiveTool = 'boundary' | 'zones' | 'obstacles' | 'plants' | null
 
@@ -33,6 +35,8 @@ function App() {
   const [activeTool, setActiveTool] = useState<ActiveTool>(null)
   const [boundary, setBoundary] = useState<GeoJSONPolygon | null>(null)
   const [isTransitioning, setIsTransitioning] = useState(false)
+  const [season, setSeason] = useState<Season>('summer')
+  const [isSatellite, setIsSatellite] = useState(false)
 
   const {
     zones, selectedType, selectedZoneId,
@@ -45,13 +49,17 @@ function App() {
   zonesRef.current = zones
   const selectedTypeRef = useRef<ZoneType>(selectedType)
   selectedTypeRef.current = selectedType
+  // Track boundary in a ref so satellite-toggle callback always has the latest value.
+  const boundaryRef = useRef<GeoJSONPolygon | null>(null)
 
   // Stable — reads boundary via closure (set once, never changes after boundary drawn).
   const handleBoundaryComplete = useCallback((polygon: GeoJSONPolygon) => {
     const map = mapRef.current
     if (!map) return
     setBoundary(polygon)
+    boundaryRef.current = polygon
     setActiveTool(null)
+    setIsSatellite(false)
     setIsTransitioning(true)
     map.setStyle(WARM_STYLE)
     map.once('style.load', () => {
@@ -78,23 +86,24 @@ function App() {
     updateZoneLayers(map, [...currentZones, newZone])
   }, [addZone])
 
-  const { isDrawing, startBoundary, startZone, stopZoneDrawing, undoLastPoint } =
+  const { isDrawing, startBoundary, startZone, cancelDrawing, undoLastPoint } =
     useDrawTool(mapRef, {
       onBoundaryComplete: handleBoundaryComplete,
       onZoneComplete: handleZoneComplete,
     })
 
   const handleToolSelect = useCallback((tool: ActiveTool) => {
+    const isActiveDrawingTool = activeTool === 'boundary' || activeTool === 'zones'
     if (tool === activeTool) {
-      if (tool === 'zones') stopZoneDrawing()
+      if (isActiveDrawingTool) cancelDrawing()
       setActiveTool(null)
       return
     }
-    if (activeTool === 'zones') stopZoneDrawing()
+    if (isActiveDrawingTool) cancelDrawing()
     setActiveTool(tool)
     if (tool === 'boundary') startBoundary()
     if (tool === 'zones') startZone()
-  }, [activeTool, startBoundary, startZone, stopZoneDrawing])
+  }, [activeTool, startBoundary, startZone, cancelDrawing])
 
   const handleMapReady = useCallback((map: MapboxMap) => {
     mapRef.current = map
@@ -106,6 +115,39 @@ function App() {
     // Compute expected post-delete array from the ref (state update is async).
     if (map) updateZoneLayers(map, zonesRef.current.filter((z) => z.id !== id))
   }, [removeZone])
+
+  const handleLocationSelect = useCallback((lng: number, lat: number) => {
+    mapRef.current?.flyTo({ center: [lng, lat], zoom: DEFAULT_ZOOM, duration: 1500 })
+  }, [])
+
+  const handleSeasonChange = useCallback((s: Season) => {
+    setSeason(s)
+    // TODO: trigger heat map recalculation when heat map is wired
+  }, [])
+
+  const handleSatelliteToggle = useCallback(() => {
+    const map = mapRef.current
+    if (!map) return
+    if (isSatellite) {
+      setIsSatellite(false)
+      setIsTransitioning(true)
+      map.setStyle(WARM_STYLE)
+      map.once('style.load', () => {
+        const b = boundaryRef.current
+        if (b) addBoundaryLayer(map, b)
+        if (zonesRef.current.length > 0) updateZoneLayers(map, zonesRef.current)
+        setIsTransitioning(false)
+      })
+    } else {
+      setIsSatellite(true)
+      map.setStyle(SATELLITE_STYLE)
+      map.once('style.load', () => {
+        const b = boundaryRef.current
+        if (b) addBoundaryLayer(map, b)
+        if (zonesRef.current.length > 0) updateZoneLayers(map, zonesRef.current)
+      })
+    }
+  }, [isSatellite])
 
   return (
     <div className="relative h-full w-full overflow-hidden">
@@ -119,7 +161,14 @@ function App() {
       )}
 
       <div className="pointer-events-none absolute inset-0">
-        <Header hasBoundary={!!boundary} />
+        <Header
+          hasBoundary={!!boundary}
+          isSatellite={isSatellite}
+          season={season}
+          onLocationSelect={handleLocationSelect}
+          onSeasonChange={handleSeasonChange}
+          onSatelliteToggle={handleSatelliteToggle}
+        />
         <ToolStrip
           activeTool={activeTool}
           hasBoundary={!!boundary}

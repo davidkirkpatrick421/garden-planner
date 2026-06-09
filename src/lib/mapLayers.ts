@@ -21,7 +21,7 @@ export function addBoundaryLayer(map: MapboxMap, boundary: GeoJSONPolygon): void
     id: 'garden-boundary-fill',
     type: 'fill',
     source: BOUNDARY_SOURCE,
-    paint: { 'fill-color': '#00450d', 'fill-opacity': 0.06 },
+    paint: { 'fill-color': '#E8A830', 'fill-opacity': 0.12 },
   })
 
   // Dashed outline — DESIGN.md §Map SVG: stroke-dasharray="6,4".
@@ -29,7 +29,7 @@ export function addBoundaryLayer(map: MapboxMap, boundary: GeoJSONPolygon): void
     id: 'garden-boundary-line',
     type: 'line',
     source: BOUNDARY_SOURCE,
-    paint: { 'line-color': '#1b5e20', 'line-width': 2.5, 'line-dasharray': [6, 4] },
+    paint: { 'line-color': '#E8A830', 'line-width': 3, 'line-dasharray': [6, 4] },
   })
 }
 
