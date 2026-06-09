@@ -43,9 +43,10 @@ export function MapCanvas({ onMapReady }: MapCanvasProps) {
     mapRef.current = map
     onMapReady?.(map)
 
-    // Trigger geolocation after the style loads. GeolocateControl handles the
-    // browser permission prompt correctly on both HTTP and HTTPS.
-    // The button stays visible so the user can re-trigger manually.
+    // Zoom + compass controls — always visible, bottom-right.
+    map.addControl(new mapboxgl.NavigationControl({ visualizePitch: true }), 'bottom-right')
+
+    // Geolocation — fires automatically on load; button stays as manual fallback.
     const geolocate = new mapboxgl.GeolocateControl({
       positionOptions: { enableHighAccuracy: true },
       fitBoundsOptions: { zoom: DEFAULT_ZOOM },

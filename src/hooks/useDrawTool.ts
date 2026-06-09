@@ -1,12 +1,18 @@
-// mapbox-gl-draw wrapper for garden boundary drawing.
-// Handles: draw_polygon mode, dragPan lock, undo-last-point, custom styling.
+// mapbox-gl-draw wrapper for boundary and zone drawing.
+//
+// Key design constraint: handleCreate must be a STABLE function reference for
+// the lifetime of the hook. If it changes, map.off() can't unregister the old
+// listener, causing them to accumulate — multiple fires per polygon, stale
+// closures, wrong labels, duplicate zones.
+//
+// Solution: store options in a ref (updated every render) so handleCreate never
+// needs options in its useCallback deps and is therefore truly stable.
 import { useCallback, useRef, useState } from 'react'
 import MapboxDraw from '@mapbox/mapbox-gl-draw'
 import type { GeoJSONPolygon } from '../types'
 import type { RefObject } from 'react'
 import type { Map as MapboxMap } from 'mapbox-gl'
 
-// DESIGN.md solar-gold + evergreen palette — replaces mapbox-gl-draw defaults.
 const DRAW_STYLES: MapboxDraw.MapboxDrawOptions['styles'] = [
   {
     id: 'gl-draw-polygon-fill-active',
@@ -59,19 +65,28 @@ const DRAW_STYLES: MapboxDraw.MapboxDrawOptions['styles'] = [
 export interface UseDrawToolResult {
   isDrawing: boolean
   startBoundary: () => void
+  startZone: () => void
+  stopZoneDrawing: () => void
   undoLastPoint: () => void
 }
 
 export function useDrawTool(
   mapRef: RefObject<MapboxMap | null>,
-  options: { onComplete: (polygon: GeoJSONPolygon) => void },
+  options: {
+    onBoundaryComplete: (polygon: GeoJSONPolygon) => void
+    onZoneComplete?: (polygon: GeoJSONPolygon) => void
+  },
 ): UseDrawToolResult {
+  // Always-current options — updated every render, read only inside callbacks.
+  const optionsRef = useRef(options)
+  optionsRef.current = options
+
   const drawRef = useRef<MapboxDraw | null>(null)
-  // isDrawingRef for synchronous checks inside callbacks; isDrawing state for re-renders.
   const isDrawingRef = useRef(false)
   const [isDrawing, setIsDrawing] = useState(false)
+  const modeRef = useRef<'boundary' | 'zone' | null>(null)
 
-  // Stable reference so map.on/off can unregister the same function.
+  // Stable for the lifetime of the hook — only depends on mapRef which is also stable.
   const handleCreate = useCallback(
     (e: { features: GeoJSON.Feature[] }) => {
       const map = mapRef.current
@@ -80,52 +95,88 @@ export function useDrawTool(
       const polygon = e.features[0]?.geometry as GeoJSONPolygon | undefined
       if (!polygon) return
 
-      isDrawingRef.current = false
-      setIsDrawing(false)
-      map.dragPan.enable()
+      if (modeRef.current === 'boundary') {
+        isDrawingRef.current = false
+        setIsDrawing(false)
+        modeRef.current = null
+        map.dragPan.enable()
+        map.off('draw.create', handleCreate)
+        map.removeControl(drawRef.current)
+        drawRef.current = null
+        optionsRef.current.onBoundaryComplete(polygon)
 
-      // Remove the draw control — the boundary becomes a permanent GL layer.
-      map.off('draw.create', handleCreate)
-      map.removeControl(drawRef.current)
-      drawRef.current = null
-
-      options.onComplete(polygon)
+      } else if (modeRef.current === 'zone') {
+        // Call through the ref — always gets the latest callback, never stale.
+        optionsRef.current.onZoneComplete?.(polygon)
+        drawRef.current.deleteAll()
+        // Defer changeMode one frame — calling it inside the draw.create handler
+        // can conflict with MapboxDraw's internal state machine.
+        const draw = drawRef.current
+        requestAnimationFrame(() => draw?.changeMode('draw_polygon'))
+      }
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [mapRef, options.onComplete],
+    [mapRef], // truly stable — no options in deps
   )
 
   const startBoundary = useCallback(() => {
     const map = mapRef.current
     if (!map || isDrawingRef.current) return
 
-    const draw = new MapboxDraw({
-      displayControlsDefault: false,
-      controls: {},
-      styles: DRAW_STYLES,
-    })
-
+    const draw = new MapboxDraw({ displayControlsDefault: false, controls: {}, styles: DRAW_STYLES })
     drawRef.current = draw
+    modeRef.current = 'boundary'
     isDrawingRef.current = true
     setIsDrawing(true)
 
     map.addControl(draw)
     draw.changeMode('draw_polygon')
-    map.dragPan.disable() // CLAUDE.md §Draw Mode Pan Lock
-
+    map.dragPan.disable()
     map.on('draw.create', handleCreate)
+  }, [mapRef, handleCreate])
+
+  const startZone = useCallback(() => {
+    const map = mapRef.current
+    if (!map) return
+
+    if (!drawRef.current) {
+      const draw = new MapboxDraw({ displayControlsDefault: false, controls: {}, styles: DRAW_STYLES })
+      drawRef.current = draw
+      map.addControl(draw)
+      map.on('draw.create', handleCreate)
+    }
+
+    modeRef.current = 'zone'
+    isDrawingRef.current = true
+    setIsDrawing(true)
+    drawRef.current.changeMode('draw_polygon')
+  }, [mapRef, handleCreate])
+
+  const stopZoneDrawing = useCallback(() => {
+    const map = mapRef.current
+    if (!map) return
+
+    if (drawRef.current) {
+      drawRef.current.deleteAll()
+      map.off('draw.create', handleCreate) // same stable reference — correctly unregisters
+      map.removeControl(drawRef.current)
+      drawRef.current = null
+    }
+
+    modeRef.current = null
+    isDrawingRef.current = false
+    setIsDrawing(false)
+    map.dragPan.enable()
   }, [mapRef, handleCreate])
 
   const undoLastPoint = useCallback(() => {
     const map = mapRef.current
     if (!map || !isDrawingRef.current) return
 
-    // MapboxDraw handles Backspace natively in draw_polygon mode.
     const container = map.getContainer()
     const opts: KeyboardEventInit = { key: 'Backspace', bubbles: true, cancelable: true }
     container.dispatchEvent(new KeyboardEvent('keydown', opts))
     container.dispatchEvent(new KeyboardEvent('keyup', opts))
   }, [mapRef])
 
-  return { isDrawing, startBoundary, undoLastPoint }
+  return { isDrawing, startBoundary, startZone, stopZoneDrawing, undoLastPoint }
 }
