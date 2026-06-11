@@ -6,6 +6,7 @@ interface ZonePanelProps {
   zones: Zone[]
   selectedType: ZoneType
   selectedZoneId: string | null
+  sunHoursByZone: Map<string, number>
   onSelectType: (type: ZoneType) => void
   onSelectZone: (id: string | null) => void
   onDeleteZone: (id: string) => void
@@ -24,6 +25,7 @@ export function ZonePanel({
   zones,
   selectedType,
   selectedZoneId,
+  sunHoursByZone,
   onSelectType,
   onSelectZone,
   onDeleteZone,
@@ -82,7 +84,9 @@ export function ZonePanel({
                     {zone.label}
                   </span>
                   <span className="font-body text-xs text-on-surface-variant">
-                    {zone.sunHours != null ? `${zone.sunHours.toFixed(1)} hrs` : '— hrs'}
+                    {sunHoursByZone.has(zone.id)
+                      ? `${sunHoursByZone.get(zone.id)!.toFixed(1)} hrs`
+                      : '— hrs'}
                   </span>
                   <button
                     type="button"
